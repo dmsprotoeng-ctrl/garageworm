@@ -187,14 +187,15 @@ pub struct S3ApiConfig {
 	/// TTL for per-key write locks (milliseconds). Default: 120000
 	#[serde(default)]
 	pub lock_ttl_ms: Option<u64>,
-	/// Enable per-key write locks and retention checks. Default: true
+	/// Enable per-key write locks and retention checks.
+	/// Default: false (opt-in).
 	#[serde(default)]
 	pub lock_enabled: Option<bool>,
 }
 
 impl S3ApiConfig {
 	pub fn lock_enabled(&self) -> bool {
-		self.lock_enabled.unwrap_or(true)
+		self.lock_enabled.unwrap_or(false)
 	}
 }
 

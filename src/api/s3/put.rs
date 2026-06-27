@@ -25,7 +25,6 @@ use garage_util::time::*;
 
 use garage_block::manager::INLINE_THRESHOLD;
 use garage_model::garage::Garage;
-use garage_model::s3::lock::LockGuard;
 use garage_model::index_counter::CountedItem;
 use garage_model::s3::block_ref_table::*;
 use garage_model::s3::object_table::*;
@@ -63,20 +62,37 @@ pub async fn handle_put(
 	key: &String,
 ) -> Result<Response<ResBody>, Error> {
 	let (_lock_guard, _lock_renew) = if ctx.garage.config.s3_api.lock_enabled() {
-		retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
+		let result = 'retry: loop {
+			for _ in 0..5 {
+				retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
 
-		let guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-		let renew = ctx.garage.lock_manager.spawn_renew(
-			guard.lock_key.clone(),
-			guard.owner,
-			guard.who.clone(),
-		);
-		(Some(guard), Some(renew))
+				match ctx
+					.garage
+					.lock_manager
+					.acquire_distributed(ctx.bucket_id, key)
+					.await
+				{
+					Ok(guard) => {
+						let renew = ctx.garage.lock_manager.spawn_renew(
+							guard.lock_key.clone(),
+							guard.owner,
+							guard.who.clone(),
+						);
+						break 'retry (Some(guard), Some(renew));
+					}
+					Err(_) => {
+						let nanos = std::time::SystemTime::now()
+							.duration_since(std::time::UNIX_EPOCH)
+							.unwrap()
+							.subsec_nanos();
+						let jitter = 10 + (nanos % 41) as u64;
+						tokio::time::sleep(std::time::Duration::from_millis(jitter)).await;
+					}
+				}
+			}
+			return Err(Error::SlowDown);
+		};
+		result
 	} else {
 		(None, None)
 	};

@@ -25,6 +25,7 @@ use garage_util::time::*;
 
 use garage_block::manager::INLINE_THRESHOLD;
 use garage_model::garage::Garage;
+use garage_model::s3::lock::LockGuard;
 use garage_model::index_counter::CountedItem;
 use garage_model::s3::block_ref_table::*;
 use garage_model::s3::object_table::*;
@@ -35,6 +36,7 @@ use garage_api_common::signature::body::StreamingChecksumReceiver;
 use garage_api_common::signature::checksum::*;
 
 use crate::api_server::{ReqBody, ResBody};
+use crate::delete::retention_check;
 use crate::encryption::{EncryptionParams, OekDerivationInfo};
 use crate::error::*;
 use crate::website::X_AMZ_WEBSITE_REDIRECT_LOCATION;
@@ -60,6 +62,25 @@ pub async fn handle_put(
 	req: Request<ReqBody>,
 	key: &String,
 ) -> Result<Response<ResBody>, Error> {
+	let (_lock_guard, _lock_renew) = if ctx.garage.config.s3_api.lock_enabled() {
+		retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
+
+		let guard = ctx
+			.garage
+			.lock_manager
+			.acquire_distributed(ctx.bucket_id, key)
+			.await
+			.map_err(|_| Error::SlowDown)?;
+		let renew = ctx.garage.lock_manager.spawn_renew(
+			guard.lock_key.clone(),
+			guard.owner,
+			guard.who.clone(),
+		);
+		(Some(guard), Some(renew))
+	} else {
+		(None, None)
+	};
+
 	// Generate version uuid now, because it is necessary to compute SSE-C
 	// encryption parameters
 	let version_uuid = gen_uuid();

@@ -1,7 +1,9 @@
 use hyper::{Request, Response, StatusCode};
 
 use garage_util::data::*;
+use garage_util::time::*;
 
+use garage_model::garage::Garage;
 use garage_model::s3::object_table::*;
 
 use garage_api_common::helpers::*;
@@ -11,10 +13,81 @@ use crate::error::*;
 use crate::put::next_timestamp;
 use crate::xml as s3_xml;
 
+/// Check if an object is under retention.
+/// If `extend_to` is Some and the object has a current retention-until that is
+/// earlier than `extend_to`, the extension is allowed (returns Ok).
+pub(crate) async fn retention_check(
+	garage: &Garage,
+	bucket_id: Uuid,
+	key: &str,
+	extend_to: Option<&str>,
+) -> Result<(), Error> {
+	let object = match garage.object_table.get(&bucket_id, &key.to_string()).await? {
+		Some(o) => o,
+		None => return Ok(()),
+	};
+
+	let latest_complete = object.versions().iter().rev().find(|v| {
+		matches!(&v.state, ObjectVersionState::Complete(ObjectVersionData::Inline(..)))
+	}).or_else(|| {
+		object.versions().iter().rev().find(|v| {
+			matches!(&v.state, ObjectVersionState::Complete(ObjectVersionData::FirstBlock(..)))
+		})
+	});
+
+	let meta = match latest_complete {
+		Some(v) => match &v.state {
+			ObjectVersionState::Complete(ObjectVersionData::Inline(m, _))
+			| ObjectVersionState::Complete(ObjectVersionData::FirstBlock(m, _)) => m,
+			_ => return Ok(()),
+		},
+		None => return Ok(()),
+	};
+
+	let inner = match &meta.encryption {
+		ObjectVersionEncryption::Plaintext { inner } => inner,
+		ObjectVersionEncryption::SseC { .. } => {
+			return Ok(());
+		}
+	};
+
+	let until_str = match inner.headers.iter()
+		.find(|(name, _)| name.as_str() == "x-amz-meta-retention-until")
+	{
+		Some((_, val)) => val,
+		None => return Ok(()),
+	};
+
+	let until_msec = rfc3339_to_msec(until_str)?;
+	if now_msec() < until_msec {
+		// Check if caller is requesting a retention extension
+		if let Some(ext_to) = extend_to {
+			let ext_msec = rfc3339_to_msec(ext_to)?;
+			if ext_msec > until_msec {
+				return Ok(());
+			}
+		}
+		garage.lock_manager.metrics.retention_blocked_counter.add(1);
+		return Err(Error::ObjectUnderRetention(until_str.clone()));
+	}
+	Ok(())
+}
+
 async fn handle_delete_internal(ctx: &ReqCtx, key: &str) -> Result<(Uuid, Uuid), Error> {
 	let ReqCtx {
 		garage, bucket_id, ..
 	} = ctx;
+
+	if garage.config.s3_api.lock_enabled() {
+		retention_check(garage, *bucket_id, key, None).await?;
+
+		let _lock_guard = garage
+			.lock_manager
+			.acquire_distributed(*bucket_id, key)
+			.await
+			.map_err(|_| Error::SlowDown)?;
+	}
+
 	let object = garage
 		.object_table
 		.get(bucket_id, &key.to_string())

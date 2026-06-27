@@ -104,6 +104,14 @@ pub enum Error {
 	/// The provided digest (checksum) value was invalid
 	#[error("Invalid digest: {0}")]
 	InvalidDigest(String),
+
+	/// The object is under retention
+	#[error("Object is under retention until {0}")]
+	ObjectUnderRetention(String),
+
+	/// Slow down (lock contention)
+	#[error("Slow down")]
+	SlowDown,
 }
 
 commonErrorDerivative!(Error);
@@ -165,6 +173,8 @@ impl Error {
 			Error::InvalidEncryptionAlgorithm(_) => "InvalidEncryptionAlgorithmError",
 			Error::NoSuchCORSConfiguration => "NoSuchCORSConfiguration",
 			Error::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
+			Error::ObjectUnderRetention(_) => "ObjectUnderRetention",
+			Error::SlowDown => "SlowDown",
 		}
 	}
 }
@@ -191,6 +201,8 @@ impl ApiError for Error {
 			| Error::InvalidXmlDe(_)
 			| Error::InvalidUtf8Str(_)
 			| Error::InvalidUtf8String(_) => StatusCode::BAD_REQUEST,
+			Error::ObjectUnderRetention(_) => StatusCode::CONFLICT,
+			Error::SlowDown => StatusCode::SERVICE_UNAVAILABLE,
 		}
 	}
 

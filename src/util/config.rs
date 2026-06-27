@@ -184,6 +184,18 @@ pub struct S3ApiConfig {
 	/// Suffix to remove from domain name to find bucket. If None,
 	/// vhost-style S3 request are disabled
 	pub root_domain: Option<String>,
+	/// TTL for per-key write locks (milliseconds). Default: 120000
+	#[serde(default)]
+	pub lock_ttl_ms: Option<u64>,
+	/// Enable per-key write locks and retention checks. Default: true
+	#[serde(default)]
+	pub lock_enabled: Option<bool>,
+}
+
+impl S3ApiConfig {
+	pub fn lock_enabled(&self) -> bool {
+		self.lock_enabled.unwrap_or(true)
+	}
 }
 
 /// Configuration for K2V api

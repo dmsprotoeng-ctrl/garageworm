@@ -1,7 +1,9 @@
 mod list;
+mod lock;
 mod multipart;
 mod objects;
 mod presigned;
+mod retention;
 mod signature_encoding;
 mod simple;
 mod ssec;

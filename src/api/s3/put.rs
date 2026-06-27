@@ -73,6 +73,9 @@ pub async fn handle_put(
 					.await
 				{
 					Ok(guard) => {
+						// Double-check retention with lock held (exclusive access)
+						retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
+
 						let renew = ctx.garage.lock_manager.spawn_renew(
 							guard.lock_key.clone(),
 							guard.owner,
@@ -85,7 +88,7 @@ pub async fn handle_put(
 							.duration_since(std::time::UNIX_EPOCH)
 							.unwrap()
 							.subsec_nanos();
-						let jitter = 10 + (nanos % 41) as u64;
+						let jitter = 300 + (nanos % 101) as u64;
 						tokio::time::sleep(std::time::Duration::from_millis(jitter)).await;
 					}
 				}

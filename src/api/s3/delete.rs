@@ -79,13 +79,34 @@ async fn handle_delete_internal(ctx: &ReqCtx, key: &str) -> Result<(Uuid, Uuid),
 	} = ctx;
 
 	if garage.config.s3_api.lock_enabled() {
-		retention_check(garage, *bucket_id, key, None).await?;
+		let mut acquired = false;
+		for _ in 0..5 {
+			retention_check(garage, *bucket_id, key, None).await?;
 
-		let _lock_guard = garage
-			.lock_manager
-			.acquire_distributed(*bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
+			match garage
+				.lock_manager
+				.acquire_distributed(*bucket_id, key)
+				.await
+			{
+				Ok(guard) => {
+					retention_check(garage, *bucket_id, key, None).await?;
+					let _lock_guard = guard;
+					acquired = true;
+					break;
+				}
+				Err(_) => {
+					let nanos = std::time::SystemTime::now()
+						.duration_since(std::time::UNIX_EPOCH)
+						.unwrap()
+						.subsec_nanos();
+					let jitter = 300 + (nanos % 101) as u64;
+					tokio::time::sleep(std::time::Duration::from_millis(jitter)).await;
+				}
+			}
+		}
+		if !acquired {
+			return Err(Error::SlowDown);
+		}
 	}
 
 	let object = garage

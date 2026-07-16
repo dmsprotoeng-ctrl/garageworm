@@ -25,7 +25,6 @@ use garage_api_common::helpers::*;
 use garage_api_common::signature::checksum::*;
 
 use crate::api_server::{ReqBody, ResBody};
-use crate::delete::retention_check;
 use crate::encryption::{has_encryption_header, EncryptionParams, OekDerivationInfo};
 use crate::error::*;
 use crate::put::*;
@@ -38,17 +37,6 @@ pub async fn handle_create_multipart_upload(
 	req: &Request<ReqBody>,
 	key: &String,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
-
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
-
 	let ReqCtx {
 		garage,
 		bucket_id,
@@ -124,15 +112,6 @@ pub async fn handle_put_part(
 	part_number: u64,
 	upload_id: &str,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
-
 	let ReqCtx { garage, .. } = &ctx;
 
 	let upload_id = decode_upload_id(upload_id)?;
@@ -299,17 +278,6 @@ pub async fn handle_complete_multipart_upload(
 	key: &str,
 	upload_id: &str,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
-
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
-
 	let ReqCtx {
 		garage,
 		bucket_id,
@@ -568,15 +536,6 @@ pub async fn handle_abort_multipart_upload(
 	key: &str,
 	upload_id: &str,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
-
 	let ReqCtx {
 		garage, bucket_id, ..
 	} = &ctx;

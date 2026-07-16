@@ -70,7 +70,6 @@ allow_punycode = true
 s3_region = "{region}"
 api_bind_addr = "127.0.0.1:{s3_port}"
 root_domain = ".s3.garage"
-lock_enabled = true
 
 [k2v_api]
 api_bind_addr = "127.0.0.1:{k2v_port}"

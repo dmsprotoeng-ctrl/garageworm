@@ -1,5 +1,4 @@
 mod list;
-mod lock;
 mod multipart;
 mod objects;
 mod presigned;

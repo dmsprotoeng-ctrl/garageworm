@@ -20,7 +20,6 @@ use garage_table::*;
 
 use crate::s3::block_ref_table::*;
 use crate::s3::lifecycle_worker;
-use crate::s3::lock::*;
 use crate::s3::mpu_table::*;
 use crate::s3::object_table::*;
 use crate::s3::version_table::*;
@@ -52,7 +51,7 @@ pub struct Garage {
 	/// The block manager
 	pub block_manager: Arc<BlockManager>,
 	/// The lock manager for per-key write locks
-	pub lock_manager: Arc<LockManager>,
+
 
 	/// Table containing admin API keys
 	pub admin_token_table: Arc<Table<AdminApiTokenTable, TableFullReplication>>,
@@ -168,10 +167,6 @@ impl Garage {
 		let block_manager = BlockManager::new(&db, &config, block_write_quorum, system.clone())?;
 		block_manager.register_bg_vars(&mut bg_vars);
 
-		info!("Initialize lock manager...");
-		let lock_ttl_ms = config.s3_api.lock_ttl_ms.unwrap_or(120_000);
-		let lock_manager = LockManager::new(system.clone(), lock_ttl_ms);
-
 		// ---- admin tables ----
 		info!("Initialize admin_token_table...");
 		let admin_token_table = Table::new(
@@ -270,7 +265,6 @@ impl Garage {
 			db,
 			system,
 			block_manager,
-			lock_manager,
 			admin_token_table,
 			bucket_table,
 			bucket_alias_table,
@@ -290,7 +284,6 @@ impl Garage {
 
 	pub fn spawn_workers(self: &Arc<Self>, bg: &BackgroundRunner) -> Result<(), Error> {
 		self.block_manager.spawn_workers(bg);
-		self.lock_manager.spawn_reaper();
 
 		self.admin_token_table.spawn_workers(bg);
 		self.bucket_table.spawn_workers(bg);

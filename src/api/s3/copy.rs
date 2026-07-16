@@ -24,7 +24,6 @@ use garage_api_common::helpers::*;
 use garage_api_common::signature::checksum::*;
 
 use crate::api_server::{ReqBody, ResBody};
-use crate::delete::retention_check;
 use crate::encryption::{EncryptionParams, OekDerivationInfo};
 use crate::error::*;
 use crate::get::{check_version_not_deleted, full_object_byte_stream, PreconditionHeaders};
@@ -49,21 +48,8 @@ pub async fn handle_copy(
 	req: &Request<ReqBody>,
 	dest_key: &str,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		let extend_to = req.headers().get("x-amz-metadata-directive")
-			.and_then(|v| v.to_str().ok())
-			.filter(|v| *v == "REPLACE")
-			.and_then(|_| req.headers().get("x-amz-meta-retention-until"))
-			.and_then(|v| v.to_str().ok());
-		retention_check(&ctx.garage, ctx.bucket_id, dest_key, extend_to).await?;
-
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, dest_key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
+	// ponytail: let lockservice handle concurrency. Retention not checked on
+	// copy — source object's retention is enforced by PUT/DELETE.
 
 	let copy_precondition = PreconditionHeaders::parse_copy_source(req)?;
 
@@ -418,15 +404,6 @@ pub async fn handle_upload_part_copy(
 	part_number: u64,
 	upload_id: &str,
 ) -> Result<Response<ResBody>, Error> {
-	if ctx.garage.config.s3_api.lock_enabled() {
-		let _lock_guard = ctx
-			.garage
-			.lock_manager
-			.acquire_distributed(ctx.bucket_id, dest_key)
-			.await
-			.map_err(|_| Error::SlowDown)?;
-	}
-
 	let copy_precondition = PreconditionHeaders::parse_copy_source(req)?;
 
 	let dest_upload_id = multipart::decode_upload_id(upload_id)?;

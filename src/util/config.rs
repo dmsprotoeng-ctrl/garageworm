@@ -184,18 +184,18 @@ pub struct S3ApiConfig {
 	/// Suffix to remove from domain name to find bucket. If None,
 	/// vhost-style S3 request are disabled
 	pub root_domain: Option<String>,
-	/// TTL for per-key write locks (milliseconds). Default: 120000
+	/// Access key ID authorized to bypass retention (governance mode).
+	/// When set, PUT/DELETE with this key skip the retention check.
 	#[serde(default)]
-	pub lock_ttl_ms: Option<u64>,
-	/// Enable per-key write locks and retention checks.
-	/// Default: false (opt-in).
-	#[serde(default)]
-	pub lock_enabled: Option<bool>,
+	pub retention_governance_access_key: Option<String>,
 }
 
 impl S3ApiConfig {
-	pub fn lock_enabled(&self) -> bool {
-		self.lock_enabled.unwrap_or(false)
+	pub fn retention_governance_bypass(&self, key_id: &str) -> bool {
+		self.retention_governance_access_key
+			.as_ref()
+			.map(|gk| key_id == gk)
+			.unwrap_or(false)
 	}
 }
 

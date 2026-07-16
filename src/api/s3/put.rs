@@ -61,44 +61,9 @@ pub async fn handle_put(
 	req: Request<ReqBody>,
 	key: &String,
 ) -> Result<Response<ResBody>, Error> {
-	let (_lock_guard, _lock_renew) = if ctx.garage.config.s3_api.lock_enabled() {
-		let result = 'retry: loop {
-			for _ in 0..5 {
-				retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
-
-				match ctx
-					.garage
-					.lock_manager
-					.acquire_distributed(ctx.bucket_id, key)
-					.await
-				{
-					Ok(guard) => {
-						// Double-check retention with lock held (exclusive access)
-						retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
-
-						let renew = ctx.garage.lock_manager.spawn_renew(
-							guard.lock_key.clone(),
-							guard.owner,
-							guard.who.clone(),
-						);
-						break 'retry (Some(guard), Some(renew));
-					}
-					Err(_) => {
-						let nanos = std::time::SystemTime::now()
-							.duration_since(std::time::UNIX_EPOCH)
-							.unwrap()
-							.subsec_nanos();
-						let jitter = 300 + (nanos % 101) as u64;
-						tokio::time::sleep(std::time::Duration::from_millis(jitter)).await;
-					}
-				}
-			}
-			return Err(Error::SlowDown);
-		};
-		result
-	} else {
-		(None, None)
-	};
+	if !ctx.garage.config.s3_api.retention_governance_bypass(&ctx.api_key.key_id) {
+		retention_check(&ctx.garage, ctx.bucket_id, key, None).await?;
+	}
 
 	// Generate version uuid now, because it is necessary to compute SSE-C
 	// encryption parameters
